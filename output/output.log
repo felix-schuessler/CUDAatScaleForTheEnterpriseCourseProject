@@ -1,0 +1,39 @@
+./bin/x86_64/linux/release/main -input=./data/Lena.pgm -kernel=median
+./bin/x86_64/linux/release/main Starting...
+
+Input file: ./data/Lena.pgm
+Kernel: median
+GPU Device 0: "Ampere" with compute capability 8.6
+
+NPP Library Version 11.3.3
+  CUDA Driver  Version: 12.6
+  CUDA Runtime Version: 11.3
+  Device 0: <          Ampere >, Compute SM 8.6 detected
+main.cpp opened: <./data/Lena.pgm> successfully!
+Saved image: ./output/Lena_medianFilter.pgm
+./bin/x86_64/linux/release/main -input=./data/Lena.pgm -kernel=sharpen
+./bin/x86_64/linux/release/main Starting...
+
+Input file: ./data/Lena.pgm
+Kernel: sharpen
+GPU Device 0: "Ampere" with compute capability 8.6
+
+NPP Library Version 11.3.3
+  CUDA Driver  Version: 12.6
+  CUDA Runtime Version: 11.3
+  Device 0: <          Ampere >, Compute SM 8.6 detected
+main.cpp opened: <./data/Lena.pgm> successfully!
+Saved image: ./output/Lena_sharpenFilter.pgm
+./bin/x86_64/linux/release/main -input=./data/Lena.pgm -kernel=laplacian
+./bin/x86_64/linux/release/main Starting...
+
+Input file: ./data/Lena.pgm
+Kernel: laplacian
+GPU Device 0: "Ampere" with compute capability 8.6
+
+NPP Library Version 11.3.3
+  CUDA Driver  Version: 12.6
+  CUDA Runtime Version: 11.3
+  Device 0: <          Ampere >, Compute SM 8.6 detected
+main.cpp opened: <./data/Lena.pgm> successfully!
+Saved image: ./output/Lena_laplacianFilter.pgm

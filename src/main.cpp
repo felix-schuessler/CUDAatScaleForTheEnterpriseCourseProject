@@ -1,0 +1,326 @@
+/* Copyright (c) 2019, NVIDIA CORPORATION. All rights reserved.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions
+ * are met:
+ *  * Redistributions of source code must retain the above copyright
+ *    notice, this list of conditions and the following disclaimer.
+ *  * Redistributions in binary form must reproduce the above copyright
+ *    notice, this list of conditions and the following disclaimer in the
+ *    documentation and/or other materials provided with the distribution.
+ *  * Neither the name of NVIDIA CORPORATION nor the names of its
+ *    contributors may be used to endorse or promote products derived
+ *    from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS ``AS IS'' AND ANY
+ * EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+ * IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR
+ * PURPOSE ARE DISCLAIMED.  IN NO EVENT SHALL THE COPYRIGHT OWNER OR
+ * CONTRIBUTORS BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL,
+ * EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR
+ * PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY
+ * OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
+ * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+ * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
+#if defined(WIN32) || defined(_WIN32) || defined(WIN64) || defined(_WIN64)
+#define WINDOWS_LEAN_AND_MEAN
+#define NOMINMAX
+#include <windows.h>
+#pragma warning(disable : 4819)
+#endif
+
+#include <Exceptions.h>
+#include <ImageIO.h>
+#include <ImagesCPU.h>
+#include <ImagesNPP.h>
+
+#include <string.h>
+#include <fstream>
+#include <iostream>
+
+#include <cuda_runtime.h>
+#include <npp.h>
+
+#include <helper_cuda.h>
+#include <helper_string.h>
+
+bool printfNPPinfo(int argc, char *argv[])
+{
+    const NppLibraryVersion *libVer = nppGetLibVersion();
+
+    printf("NPP Library Version %d.%d.%d\n", libVer->major, libVer->minor,
+           libVer->build);
+
+    int driverVersion, runtimeVersion;
+    cudaDriverGetVersion(&driverVersion);
+    cudaRuntimeGetVersion(&runtimeVersion);
+
+    printf("  CUDA Driver  Version: %d.%d\n", driverVersion / 1000,
+           (driverVersion % 100) / 10);
+    printf("  CUDA Runtime Version: %d.%d\n", runtimeVersion / 1000,
+           (runtimeVersion % 100) / 10);
+
+    // Min spec is SM 1.0 devices
+    bool bVal = checkCudaCapabilities(1, 0);
+    return bVal;
+}
+
+void parseArguments(int argc, char *argv[], std::string &inputFile, std::string &kernel)
+{
+    char *filePath = nullptr;
+    char *kernelPath = nullptr;
+
+    if (checkCmdLineFlag(argc, (const char **)argv, "input"))
+    {
+        getCmdLineArgumentString(argc, (const char **)argv, "input", &filePath);
+        inputFile = filePath;
+    }
+    else
+    {
+        std::cerr << "Error: Input file must be specified using -input=<filename>" << std::endl;
+        exit(EXIT_FAILURE);
+    }
+    if (checkCmdLineFlag(argc, (const char **)argv, "kernel"))
+    {
+        getCmdLineArgumentString(argc, (const char **)argv, "kernel", &kernelPath);
+        kernel = kernelPath;
+    }
+    else
+    {
+        kernel = "";
+    }
+}
+
+std::string buildOutputPath(const std::string &inputFile, const std::string &kernel)
+{
+    // Find the last occurrence of the slash in the input filename
+    std::string::size_type lastSlash = inputFile.rfind('/');
+    std::string fileName = (lastSlash != std::string::npos) ? inputFile.substr(lastSlash + 1) : inputFile;
+
+    // Find the last occurrence of the dot in the file name
+    std::string::size_type dot = fileName.rfind('.');
+
+    // If a dot exists, take the part before it; otherwise, take the full fileName
+    std::string baseName = (dot != std::string::npos) ? fileName.substr(0, dot) : fileName;
+
+    // Construct the output path
+    std::string outputPath = "./output/" + baseName + "_" + kernel + ".pgm";
+
+    return outputPath;
+}
+
+template <typename Func, typename... Args>
+void safeExecute(Func &&func, Args &&... args)
+{
+    try
+    {
+        func(std::forward<Args>(args)...);
+    }
+    catch (npp::Exception &rException)
+    {
+        std::cerr << "Program error! The following exception occurred: \n";
+        std::cerr << rException << std::endl;
+        std::cerr << "Aborting." << std::endl;
+
+        exit(EXIT_FAILURE);
+    }
+    catch (...)
+    {
+        std::cerr << "Program error! An unknown type of exception occurred. \n";
+        std::cerr << "Aborting." << std::endl;
+
+        exit(EXIT_FAILURE);
+    }
+}
+
+void medianFilter(const std::string &inputFile)
+{
+    // Declare a host image object for an 8-bit grayscale image
+    npp::ImageCPU_8u_C1 oHostSrc;
+    // Load grayscale image from disk
+    npp::loadImage(inputFile, oHostSrc);
+
+    // Declare a device image and copy construct from the host image
+    // (i.e., upload host image to device)
+    npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
+
+    // Define the median filter mask size
+    NppiSize oMaskSize = {5, 5}; // A 5x5 kernel for median filtering
+
+    // Set the image size and offsets
+    NppiSize oSrcSize = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
+    NppiPoint oSrcOffset = {0, 0};
+
+    // Define the ROI (Region of Interest)
+    NppiSize oSizeROI = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
+
+    // Allocate device image for the output (filtered result)
+    npp::ImageNPP_8u_C1 oDeviceDst(oSizeROI.width, oSizeROI.height);
+
+    // Set the anchor point for the mask (center of the mask)
+    NppiPoint oAnchor = {oMaskSize.width / 2, oMaskSize.height / 2};
+
+    // Get the buffer size required for the median filter
+    Npp32u nBufferSize = 0;
+    NPP_CHECK_NPP(nppiFilterMedianGetBufferSize_8u_C1R(oSizeROI, oMaskSize, &nBufferSize));
+
+    // Allocate memory for the buffer
+    Npp8u *pBuffer;
+    cudaMalloc((void **)&pBuffer, nBufferSize);
+
+    // Apply the median filter
+    NPP_CHECK_NPP(nppiFilterMedian_8u_C1R(
+        oDeviceSrc.data(), oDeviceSrc.pitch(), // Input source
+        oDeviceDst.data(), oDeviceDst.pitch(), // Output destination
+        oSizeROI,                              // Size of the ROI
+        oMaskSize,                             // Mask size
+        oAnchor,                               // Anchor point
+        pBuffer                                // Temporary buffer
+        ));
+
+    // Declare a host image for the result
+    npp::ImageCPU_8u_C1 oHostDst(oDeviceDst.size());
+    // Copy the device result data back to the host image
+    oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
+
+    // Construct the output filename
+    std::string outputFile = buildOutputPath(inputFile, "medianFilter");
+
+    // Save the filtered image to disk
+    saveImage(outputFile, oHostDst);
+
+    std::cout << "Saved image: " << outputFile << std::endl;
+
+    // Free device memory
+    //nppiFree(oDeviceSrc.data());
+    //nppiFree(oDeviceDst.data());
+    cudaFree(pBuffer); // Free the temporary buffer
+}
+
+
+void sharpenFilter(const std::string &inputFile)
+{
+    npp::ImageCPU_8u_C1 oHostSrc;
+    npp::loadImage(inputFile, oHostSrc);
+    
+
+    npp::ImageNPP_8u_C1 oDeviceSrc(oHostSrc);
+
+    const NppiSize srcSize = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
+    const NppiPoint srcOffset = {0, 0};
+    const NppiSize filterROI = {(int)oDeviceSrc.width(), (int)oDeviceSrc.height()};
+    npp::ImageNPP_8u_C1 onDeviceDst(filterROI.width, filterROI.height);
+
+    NPP_CHECK_NPP(nppiFilterSharpenBorder_8u_C1R(
+        oDeviceSrc.data(),                   // Input image data
+        oDeviceSrc.pitch(),                  // Input image pitch
+        srcSize,                             // Size of the source image
+        srcOffset,                           // Offset in the source image
+        onDeviceDst.data(),                  // Output image data
+        onDeviceDst.pitch(),                 // Output image pitch
+        filterROI,                           // Size of the filter ROI
+        NppiBorderType::NPP_BORDER_REPLICATE // Border type
+        ));
+
+    npp::ImageCPU_8u_C1 oHostDst(onDeviceDst.size());
+    onDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
+    std::string outputFile = buildOutputPath(inputFile, "sharpenFilter");
+    saveImage(outputFile, oHostDst);
+
+    std::cout << "Saved image: " << outputFile << std::endl;
+    //nppiFree(oDeviceSrc.data());
+    //nppiFree(onDeviceDst.data());
+}
+
+void laplacianFilter(const std::string &inputFile)
+{
+    npp::ImageCPU_8u_C1 oHostSrc;
+    npp::loadImage(inputFile, oHostSrc);
+    npp::ImageNPP_8u_C1 deviceSrc(oHostSrc);
+
+    const NppiSize srcSize = {(int)deviceSrc.width(), (int)deviceSrc.height()};
+    const NppiPoint srcOffset = {0, 0};
+
+    npp::ImageNPP_8u_C1 onDeviceDst(srcSize.width, srcSize.height);
+
+    NPP_CHECK_NPP(nppiFilterLaplace_8u_C1R(
+        deviceSrc.data(), deviceSrc.pitch(),     // Input image data
+        onDeviceDst.data(), onDeviceDst.pitch(), // Output image data
+        srcSize,                                 // Size of the ROI
+        NPP_MASK_SIZE_3_X_3                      
+        ));
+
+    npp::ImageCPU_8u_C1 oHostDst(onDeviceDst.size());
+    onDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
+    std::string outputFile = buildOutputPath(inputFile, "laplacianFilter");
+    saveImage(outputFile, oHostDst);
+
+    std::cout << "Saved image: " << outputFile << std::endl;
+}
+
+int main(int argc, char *argv[])
+{
+    printf("%s Starting...\n\n", argv[0]);
+
+    std::string inputFile;
+    std::string kernel;
+
+    parseArguments(argc, argv, inputFile, kernel);
+
+    std::cout << "Input file: " << inputFile << std::endl;
+    std::cout << "Kernel: " << (kernel.empty() ? "None" : kernel) << std::endl;
+
+    findCudaDevice(argc, (const char **)argv);
+
+    if (printfNPPinfo(argc, argv) == false)
+    {
+        exit(EXIT_SUCCESS);
+    }
+
+    int file_errors = 0;
+    std::ifstream infile(inputFile.data(), std::ifstream::in);
+
+    if (infile.good())
+    {
+        std::cout << "main.cpp opened: <" << inputFile.data() << "> successfully!" << std::endl;
+        file_errors = 0;
+        infile.close();
+    }
+    else
+    {
+        std::cout << "main.cpp unable to open: <" << inputFile.data() << ">" << std::endl;
+        file_errors++;
+        infile.close();
+    }
+
+    if (file_errors > 0)
+    {
+        exit(EXIT_FAILURE);
+    }
+
+    if (kernel == "median")
+    {
+        safeExecute(medianFilter, inputFile);
+        return 0;
+    }
+    if (kernel == "sharpen")
+    {
+        safeExecute(sharpenFilter, inputFile);
+        return 0;
+    }
+    if (kernel == "laplacian")
+    {
+        safeExecute(laplacianFilter, inputFile);
+        return 0;
+    }
+
+    std::cout << "Executing all filters...\n"; 
+    safeExecute(medianFilter, inputFile);
+    safeExecute(sharpenFilter, inputFile);
+    safeExecute(laplacianFilter, inputFile);
+
+    return 0;
+}
