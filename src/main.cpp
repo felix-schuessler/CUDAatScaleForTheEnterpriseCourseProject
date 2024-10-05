@@ -136,6 +136,32 @@ void safeExecute(Func &&func, Args &&... args)
     }
 }
 
+void saveImageAsPNG(const std::string &rFileName, const npp::ImageCPU_8u_C1 &rImage)
+{
+    // Create the result image storage using FreeImage to save it as PNG
+    FIBITMAP *pResultBitmap = FreeImage_Allocate(rImage.width(), rImage.height(), 8 /* bits per pixel */);
+    NPP_ASSERT_NOT_NULL(pResultBitmap);
+
+    unsigned int nDstPitch = FreeImage_GetPitch(pResultBitmap);
+    Npp8u *pDstLine = FreeImage_GetBits(pResultBitmap) + nDstPitch * (rImage.height() - 1);
+    const Npp8u *pSrcLine = rImage.data();
+    unsigned int nSrcPitch = rImage.pitch();
+
+    for (size_t iLine = 0; iLine < rImage.height(); ++iLine)
+    {
+        memcpy(pDstLine, pSrcLine, rImage.width() * sizeof(Npp8u));
+        pSrcLine += nSrcPitch;
+        pDstLine -= nDstPitch;
+    }
+
+    // Save the result image as PNG
+    bool bSuccess = FreeImage_Save(FIF_PNG, pResultBitmap, rFileName.c_str(), 0) == TRUE;
+    NPP_ASSERT_MSG(bSuccess, "Failed to save PNG image.");
+
+    // Free the allocated image memory
+    FreeImage_Unload(pResultBitmap);
+}
+
 void medianFilter(const std::string &inputFile)
 {
     // Declare a host image object for an 8-bit grayscale image
@@ -193,7 +219,7 @@ void medianFilter(const std::string &inputFile)
     // Save the filtered image to disk
     saveImage(outputFilePGM, oHostDst);
     std::cout << "Saved image: " << outputFilePGM << std::endl;
-    saveImage(outputFilePNG, oHostDst);
+    saveImageAsPNG(outputFilePNG, oHostDst);
     std::cout << "Saved image: " << outputFilePNG << std::endl;
 
     // Free device memory
@@ -237,7 +263,7 @@ void sharpenFilter(const std::string &inputFile)
     // Save the filtered image to disk
     saveImage(outputFilePGM, oHostDst);
     std::cout << "Saved image: " << outputFilePGM << std::endl;
-    saveImage(outputFilePNG, oHostDst);
+    saveImageAsPNG(outputFilePNG, oHostDst);
     std::cout << "Saved image: " << outputFilePNG << std::endl;
 
     //nppiFree(oDeviceSrc.data());
@@ -271,7 +297,7 @@ void laplacianFilter(const std::string &inputFile)
     // Save the filtered image to disk
     saveImage(outputFilePGM, oHostDst);
     std::cout << "Saved image: " << outputFilePGM << std::endl;
-    saveImage(outputFilePNG, oHostDst);
+    saveImageAsPNG(outputFilePNG, oHostDst);
     std::cout << "Saved image: " << outputFilePNG << std::endl;
 }
 
