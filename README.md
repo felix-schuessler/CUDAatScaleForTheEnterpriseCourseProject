@@ -14,13 +14,13 @@ The project allows users to specify an input image file (in .PGM format) and cho
 
 Here are some example images showing the effects of the filters applied:
 
-![Median Filter](./output/Lena_medianFilter.pgm)
+![Median Filter](./output/Lena_medianFilter.png)
 *Example of Median Filter*
 
-![Sharpening Filter](./output/Lena_sharpenFilter.pgm)
+![Sharpening Filter](./output/Lena_sharpenFilter.png)
 *Example of Sharpening Filter*
 
-![Laplacian Filter](./output/Lena_laplacianFilter.pgm)
+![Laplacian Filter](./output/Lena_laplacianFilter.png)
 *Example of Laplacian Filter*
 
 ## Directory Structure

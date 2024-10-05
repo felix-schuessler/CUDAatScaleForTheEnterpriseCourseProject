@@ -94,7 +94,7 @@ void parseArguments(int argc, char *argv[], std::string &inputFile, std::string 
     }
 }
 
-std::string buildOutputPath(const std::string &inputFile, const std::string &kernel)
+std::string buildOutputPath(const std::string &inputFile, const std::string &kernel, const std::string &extension)
 {
     // Find the last occurrence of the slash in the input filename
     std::string::size_type lastSlash = inputFile.rfind('/');
@@ -107,7 +107,7 @@ std::string buildOutputPath(const std::string &inputFile, const std::string &ker
     std::string baseName = (dot != std::string::npos) ? fileName.substr(0, dot) : fileName;
 
     // Construct the output path
-    std::string outputPath = "./output/" + baseName + "_" + kernel + ".pgm";
+    std::string outputPath = "./output/" + baseName + "_" + kernel + extension;
 
     return outputPath;
 }
@@ -164,7 +164,7 @@ void medianFilter(const std::string &inputFile)
     NppiPoint oAnchor = {oMaskSize.width / 2, oMaskSize.height / 2};
 
     // Get the buffer size required for the median filter
-    Npp32u nBufferSize = 0;
+    Npp32u nBufferSize = 0; // Change to Npp32u instead of int
     NPP_CHECK_NPP(nppiFilterMedianGetBufferSize_8u_C1R(oSizeROI, oMaskSize, &nBufferSize));
 
     // Allocate memory for the buffer
@@ -187,12 +187,14 @@ void medianFilter(const std::string &inputFile)
     oDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
 
     // Construct the output filename
-    std::string outputFile = buildOutputPath(inputFile, "medianFilter");
+    std::string outputFilePGM = buildOutputPath(inputFile, "medianFilter", ".pgm");
+    std::string outputFilePNG = buildOutputPath(inputFile, "medianFilter", ".png");
 
     // Save the filtered image to disk
-    saveImage(outputFile, oHostDst);
-
-    std::cout << "Saved image: " << outputFile << std::endl;
+    saveImage(outputFilePGM, oHostDst);
+    std::cout << "Saved image: " << outputFilePGM << std::endl;
+    saveImage(outputFilePNG, oHostDst);
+    std::cout << "Saved image: " << outputFilePNG << std::endl;
 
     // Free device memory
     //nppiFree(oDeviceSrc.data());
@@ -227,10 +229,17 @@ void sharpenFilter(const std::string &inputFile)
 
     npp::ImageCPU_8u_C1 oHostDst(onDeviceDst.size());
     onDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
-    std::string outputFile = buildOutputPath(inputFile, "sharpenFilter");
-    saveImage(outputFile, oHostDst);
 
-    std::cout << "Saved image: " << outputFile << std::endl;
+    // Construct the output filename
+    std::string outputFilePGM = buildOutputPath(inputFile, "sharpenFilter", ".pgm");
+    std::string outputFilePNG = buildOutputPath(inputFile, "sharpenFilter", ".png");
+
+    // Save the filtered image to disk
+    saveImage(outputFilePGM, oHostDst);
+    std::cout << "Saved image: " << outputFilePGM << std::endl;
+    saveImage(outputFilePNG, oHostDst);
+    std::cout << "Saved image: " << outputFilePNG << std::endl;
+
     //nppiFree(oDeviceSrc.data());
     //nppiFree(onDeviceDst.data());
 }
@@ -255,10 +264,15 @@ void laplacianFilter(const std::string &inputFile)
 
     npp::ImageCPU_8u_C1 oHostDst(onDeviceDst.size());
     onDeviceDst.copyTo(oHostDst.data(), oHostDst.pitch());
-    std::string outputFile = buildOutputPath(inputFile, "laplacianFilter");
-    saveImage(outputFile, oHostDst);
 
-    std::cout << "Saved image: " << outputFile << std::endl;
+    std::string outputFilePGM = buildOutputPath(inputFile, "laplacianFilter", ".pgm");
+    std::string outputFilePNG = buildOutputPath(inputFile, "laplacianFilter", ".png");
+
+    // Save the filtered image to disk
+    saveImage(outputFilePGM, oHostDst);
+    std::cout << "Saved image: " << outputFilePGM << std::endl;
+    saveImage(outputFilePNG, oHostDst);
+    std::cout << "Saved image: " << outputFilePNG << std::endl;
 }
 
 int main(int argc, char *argv[])
